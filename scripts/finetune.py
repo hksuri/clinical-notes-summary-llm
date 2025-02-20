@@ -18,28 +18,26 @@ from transformers import (
     Seq2SeqTrainingArguments,
 )
 from evaluate import load as load_metric
-import torch
-torch.mps.empty_cache()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune a seq2seq model for dialogue-to-note summarization.")
-    parser.add_argument("--model_name", type=str, default="google/flan-t5-base",
+    parser.add_argument("--model_name", type=str, default="facebook/bart-large-cnn",
                         help="Hugging Face model identifier, e.g. google/flan-t5-base")
     parser.add_argument("--train_file", type=str, default="../../clinical_visit_note_summarization_corpus/data/aci-bench/challenge_data/train.csv",
                         help="Path to the training CSV file.")
     parser.add_argument("--val_file", type=str, default="../../clinical_visit_note_summarization_corpus/data/aci-bench/challenge_data/valid.csv",
                         help="Path to the validation CSV file.")
     
-    parser.add_argument("--batch_size", type=int, default=2,
+    parser.add_argument("--batch_size", type=int, default=1,
                         help="Training batch size per device.")
     parser.add_argument("--num_train_epochs", type=int, default=3,
                         help="Number of epochs to train.")
     parser.add_argument("--lr", type=float, default=5e-5,
                         help="Initial learning rate.")
     
-    parser.add_argument("--max_source_length", type=int, default=3050,
+    parser.add_argument("--max_source_length", type=int, default=1024,
                         help="Max input sequence length (dialogue).")
-    parser.add_argument("--max_target_length", type=int, default=900,
+    parser.add_argument("--max_target_length", type=int, default=512,
                         help="Max target sequence length (note).")
     
     parser.add_argument("--output_dir", type=str, default="../../finetuned_models",
@@ -80,6 +78,10 @@ def main():
                 truncation=True
             )
         model_inputs["labels"] = labels["input_ids"]
+
+        vocab_size = tokenizer.vocab_size
+        model_inputs["labels"] = [[min(vocab_size - 1, token) if token >= 0 else -100 for token in seq]for seq in model_inputs["labels"]]
+
         return model_inputs
 
     print("Tokenizing dataset...")
@@ -107,6 +109,8 @@ def main():
 
     def compute_metrics(eval_pred):
         predictions, labels = eval_pred
+        print(f'predictions: {predictions}')
+        print(f'labels: {labels}')
         decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
@@ -118,7 +122,10 @@ def main():
             predictions=decoded_preds, references=decoded_labels, use_stemmer=True
         )
         # Extract a few ROUGE scores
-        result = {key: value.mid.fmeasure * 100 for key, value in result.items()}
+        result = {
+        key: (value.mid.fmeasure * 100 if hasattr(value, "mid") else value * 100)
+        for key, value in result.items()
+        }
         return result
 
     # Initialize Trainer
@@ -137,7 +144,7 @@ def main():
 
     # Save final model
     print(f"Saving model to {model_output_dir}")
-    trainer.save_ (model_output_dir)
+    trainer.save_model(model_output_dir)
     tokenizer.save_pretrained(model_output_dir)
 
     # # Print final metrics
