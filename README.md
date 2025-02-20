@@ -41,7 +41,7 @@ We fine-tuned a Hugging Face seq2seq model (by default, `facebook/bart-large-cnn
 
 ## Evaluation Results
 | **rouge1** | **rouge2** | **rougeL** | **rougeLsum** |
-|--------|--------|--------|-----------|
+|:--------:|:--------:|:--------:|:-----------:|
 | 49.87  | 22.43  | 25.94  | 49.99     |
 
 ## Future Steps
