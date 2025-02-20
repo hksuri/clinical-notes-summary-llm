@@ -11,19 +11,20 @@ import pandas as pd
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from evaluate import load as load_metric
+import torch
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a fine-tuned seq2seq model on test data.")
-    parser.add_argument("--model_path", type=str, required=True,
+    parser.add_argument("--model_path", type=str, default="../../finetuned_models/facebook_bart-large-cnn",
                         help="Path to the fine-tuned model directory, e.g. outputs/google_flan-t5-base.")
     parser.add_argument("--test_file", type=str, default="../../clinical_visit_note_summarization_corpus/data/aci-bench/challenge_data/clinicalnlp_taskB_test1.csv",
                         help="Path to the test CSV file.")
     
-    parser.add_argument("--max_source_length", type=int, default=3050,
+    parser.add_argument("--max_source_length", type=int, default=1024,
                         help="Max input length (dialogue).")
-    parser.add_argument("--max_target_length", type=int, default=900,
+    parser.add_argument("--max_target_length", type=int, default=512,
                         help="Max length for generated summary.")
-    parser.add_argument("--batch_size", type=int, default=2,
+    parser.add_argument("--batch_size", type=int, default=1,
                         help="Batch size for inference.")
     return parser.parse_args()
 
@@ -62,13 +63,16 @@ def main():
         )
 
         # Generate
-        with model.cuda() if model.device.type == "cuda" else model.cpu():
-            outputs = model.generate(
-                input_ids=inputs["input_ids"].to(model.device),
-                attention_mask=inputs["attention_mask"].to(model.device),
-                max_length=args.max_target_length,
-                num_beams=4
-            )
+        if torch.cuda.is_available():
+            model = model.cuda()
+        else:
+            model = model.cpu()
+        outputs = model.generate(
+            input_ids=inputs["input_ids"].to(model.device),
+            attention_mask=inputs["attention_mask"].to(model.device),
+            max_length=args.max_target_length,
+            num_beams=4
+        )
         batch_preds = tokenizer.batch_decode(outputs, skip_special_tokens=True)
         predictions.extend(batch_preds)
 
@@ -78,7 +82,10 @@ def main():
     ref_for_metric = ["\n".join(ref.strip().split()) for ref in references]
 
     result = rouge_metric.compute(predictions=pred_for_metric, references=ref_for_metric)
-    rouge_scores = {key: value.mid.fmeasure * 100 for key, value in result.items()}
+    rouge_scores = {
+        key: (value.mid.fmeasure * 100 if hasattr(value, "mid") else value * 100)
+        for key, value in result.items()
+    }
 
     # Save predictions to a CSV in `summaries/`
     summary_dir = "../summaries"
